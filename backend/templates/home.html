@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <title>RIO Onderwijsvisualisatie MVP</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>RIO Onderwijslandschap</h1>
+    <p>Verken erkende onderwijsinstellingen en hun locaties op basis van RIO LOD.</p>
+  </header>
+
+  <main>
+    <section class="search-section">
+      <h2>1. Zoek erkende instellingen per plaats</h2>
+      <form id="search-form">
+        <label>
+          Plaatsnaam:
+          <input type="text" id="plaatsnaam" name="plaatsnaam" required />
+        </label>
+        <label>
+          Datum (optioneel, YYYY-MM-DD):
+          <input type="text" id="datum" name="datum" placeholder="Bijv. 2025-09-01" />
+        </label>
+        <button type="submit">Zoek</button>
+      </form>
+
+      <div id="erkenningen-result"></div>
+    </section>
+
+    <section class="detail-section">
+      <h2>2. Detail: locaties & onderwijslicenties</h2>
+      <p>Klik op een erkenning in het overzicht om detail te laden.</p>
+      <div id="erkenning-detail"></div>
+    </section>
+
+    <section class="opleidingen-section">
+      <h2>3. Aangeboden opleidingen per instelling</h2>
+      <p>Klik op een erkenning ID in sectie 1 om automatisch opleidingen te laden, of voer handmatig een organisatorische eenheid code in.</p>
+      <p><small>Organisatorische eenheid codes zijn te vinden via erkende instellingen. Hier zijn enkele werkende voorbeelden:</small></p>
+      <div style="margin-bottom: 1rem;">
+        <button onclick="tryExampleCode('115A122')">Probeer: Hilal (BO)</button>
+        <button onclick="tryExampleCode('110A838')">Probeer: Conservatorium Amsterdam</button>
+        <button onclick="tryExampleCode('101A214')">Probeer: Alfa-college Groningen</button>
+        <button onclick="tryExampleCode('100A385')">Probeer: MBO Amersfoort</button>
+      </div>
+      <form id="opleidingen-form">
+        <label>
+          Organisatorische eenheid code:
+          <input type="text" id="org-eenheid-code" placeholder="Bijv. 110A838" />
+        </label>
+        <label>
+          Datum (optioneel, YYYY-MM-DD):
+          <input type="text" id="opleidingen-datum" placeholder="Bijv. 2025-09-01" />
+        </label>
+        <button type="submit">Zoek opleidingen</button>
+      </form>
+      <div id="opleidingen-result"></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("search-form");
+    const resultDiv = document.getElementById("erkenningen-result");
+    const detailDiv = document.getElementById("erkenning-detail");
+    const opleidingenDiv = document.getElementById("opleidingen-result");
+    const opleidingenForm = document.getElementById("opleidingen-form");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const plaatsnaam = document.getElementById("plaatsnaam").value.trim();
+      const datum = document.getElementById("datum").value.trim();
+
+      // Disable form tijdens laden
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Zoeken...";
+
+      const params = new URLSearchParams({ plaatsnaam });
+      if (datum) params.set("datum", datum);
+
+      resultDiv.textContent = "Laden...";
+      detailDiv.textContent = "";
+
+      try {
+        const res = await fetch(`/api/erkenningen?${params.toString()}`);
+        if (!res.ok) {
+          const errorText = await res.text();
+          resultDiv.textContent = `Fout bij ophalen erkenningen: ${res.status} ${res.statusText}`;
+          console.error("API Error:", errorText);
+          return;
+        }
+        const data = await res.json();
+
+        if (!data.results || data.results.length === 0) {
+        resultDiv.textContent = "Geen resultaten gevonden.";
+        return;
+      }
+
+      // Bouw tabel met een paar kernvelden uit de Erkenning-schema
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      thead.innerHTML = `
+        <tr>
+          <th>ID</th>
+          <th>Type</th>
+          <th>Verkorte naam</th>
+          <th>Volledige naam</th>
+          <th>Bekostiging</th>
+        </tr>`;
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      data.results.forEach((item) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><button data-id="${item.id}">${item.id}</button></td>
+          <td>${item.type || ""}</td>
+          <td>${item.verkorteNaam || ""}</td>
+          <td>${item.volledigeNaam || ""}</td>
+          <td>${item.bekostigingscode || ""}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+
+      resultDiv.innerHTML = "";
+      resultDiv.appendChild(table);
+
+      // Click handlers voor detail en opleidingen
+      tbody.querySelectorAll("button[data-id]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          loadErkenningDetail(btn.dataset.id);
+          loadOpleidingen(btn.dataset.id, datum);
+        });
+      });
+
+      } catch (error) {
+        resultDiv.textContent = "Netwerkfout bij ophalen erkenningen.";
+        console.error("Network Error:", error);
+      } finally {
+        // Re-enable form altijd
+        const submitBtn = form.querySelector('button[type="submit"]');
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Zoek";
+      }
+    });
+
+    async function loadErkenningDetail(id) {
+      detailDiv.textContent = "Detail laden...";
+      try {
+        const res = await fetch(`/api/erkenningen/${id}`);
+        if (!res.ok) {
+          const errorText = await res.text();
+          detailDiv.textContent = `Fout bij ophalen detail: ${res.status} ${res.statusText}`;
+          console.error("Detail API Error:", errorText);
+          return;
+        }
+        const data = await res.json();
+      } catch (error) {
+        detailDiv.textContent = "Netwerkfout bij ophalen detail.";
+        console.error("Detail Network Error:", error);
+        return;
+      }
+
+      // Heel simpel: toon JSON-blokken, plus een paar velden netjes
+      const erkenning = data.erkenning;
+      const locaties = data.locaties || [];
+      const licenties = data.onderwijslicenties || [];
+
+      const container = document.createElement("div");
+
+      const heading = document.createElement("h3");
+      heading.textContent = erkenning.verkorteNaam || erkenning.volledigeNaam || id;
+      container.appendChild(heading);
+
+      const meta = document.createElement("p");
+      meta.textContent = `Type: ${erkenning.type} | Code: ${erkenning.code}`;
+      container.appendChild(meta);
+
+      // Locaties
+      const locSection = document.createElement("section");
+      locSection.innerHTML = "<h4>Onderwijslocatiegebruiken</h4>";
+      if (locaties.length === 0) {
+        locSection.innerHTML += "<p>Geen locaties gevonden.</p>";
+      } else {
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(locaties, null, 2);
+        locSection.appendChild(pre);
+      }
+      container.appendChild(locSection);
+
+      // Licenties
+      const licSection = document.createElement("section");
+      licSection.innerHTML = "<h4>Onderwijslicenties</h4>";
+      if (licenties.length === 0) {
+        licSection.innerHTML += "<p>Geen onderwijslicenties gevonden.</p>";
+      } else {
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(licenties, null, 2);
+        licSection.appendChild(pre);
+      }
+      container.appendChild(licSection);
+
+      detailDiv.innerHTML = "";
+      detailDiv.appendChild(container);
+    }
+
+    async function loadOpleidingen(erkenningId, datum) {
+      opleidingenDiv.textContent = "Opleidingen laden...";
+
+      try {
+        // Haal organisatorische eenheden op via de specifieke endpoint
+        const params = new URLSearchParams();
+        if (datum) params.set("datum", datum);
+
+        const orgEenhedenRes = await fetch(`/api/erkenningen/${erkenningId}/organisatorische-eenheden?${params.toString()}`);
+        if (!orgEenhedenRes.ok) {
+          opleidingenDiv.textContent = `Fout bij ophalen organisatorische eenheden: ${orgEenhedenRes.status}`;
+          return;
+        }
+        const orgEenhedenData = await orgEenhedenRes.json();
+
+        if (!orgEenhedenData.results || orgEenhedenData.results.length === 0) {
+          opleidingenDiv.textContent = "Geen organisatorische eenheden gevonden voor deze erkenning. Probeer een organisatorische eenheid code handmatig in te voeren.";
+          return;
+        }
+
+        // Gebruik de eerste organisatorische eenheid
+        const orgEenheidCode = orgEenhedenData.results[0].code;
+
+        // Laad opleidingen met de gevonden code via de nieuwe API
+        await loadOpleidingenByCode(orgEenheidCode, datum);
+
+      } catch (error) {
+        opleidingenDiv.textContent = "Netwerkfout bij ophalen opleidingen.";
+        console.error("Opleidingen Network Error:", error);
+      }
+    }
+
+    async function loadOpleidingenByCode(orgEenheidCode, datum) {
+      opleidingenDiv.textContent = "Opleidingen laden...";
+
+      try {
+        // Laad aangeboden opleidingen via de verbeterde API
+        const params = new URLSearchParams();
+        if (datum) params.set("datum_geldig_op", datum);
+
+        const opleidingenRes = await fetch(`/api/instellingen/${orgEenheidCode}/opleidingen?${params.toString()}`);
+
+        if (!opleidingenRes.ok) {
+          let errorMsg = `Fout bij ophalen opleidingen: ${opleidingenRes.status}`;
+          if (opleidingenRes.status === 400) {
+            errorMsg += " - Ongeldige organisatorische eenheid code. Controleer de code en probeer opnieuw.";
+          } else if (opleidingenRes.status === 404) {
+            errorMsg += " - Geen opleidingen gevonden voor deze code.";
+          }
+          opleidingenDiv.innerHTML = `<p style="color: red;">${errorMsg}</p>`;
+          return;
+        }
+
+        const opleidingenData = await opleidingenRes.json();
+
+        if (!opleidingenData.items || opleidingenData.items.length === 0) {
+          opleidingenDiv.textContent = "Geen aangeboden opleidingen gevonden.";
+          return;
+        }
+
+        // Bouw tabel voor opleidingen
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        thead.innerHTML = `
+          <tr>
+            <th>Opleidingsnaam</th>
+            <th>Niveau</th>
+            <th>Type</th>
+            <th>Begindatum</th>
+          </tr>`;
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        opleidingenData.items.forEach((item) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${item.opleidingNaam || 'Onbekend'}</td>
+            <td>${item.opleidingNiveau || '-'}</td>
+            <td>${item.type || 'Onbekend'}</td>
+            <td>${item.begindatum || '-'}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+
+        opleidingenDiv.innerHTML = `<h3>Opleidingen voor organisatorische eenheid ${orgEenheidCode}</h3>
+                                    <p>Totaal: ${opleidingenData.aantalOpleidingen} opleidingen</p>`;
+        opleidingenDiv.appendChild(table);
+
+      } catch (error) {
+        opleidingenDiv.textContent = "Netwerkfout bij ophalen opleidingen.";
+        console.error("Opleidingen Network Error:", error);
+      }
+    }
+
+    function tryExampleCode(code) {
+      document.getElementById("org-eenheid-code").value = code;
+      // Trigger submit event
+      document.getElementById("opleidingen-form").dispatchEvent(new Event('submit'));
+    }
+
+    opleidingenForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const orgEenheidCode = document.getElementById("org-eenheid-code").value.trim();
+      const datum = document.getElementById("opleidingen-datum").value.trim();
+
+      if (!orgEenheidCode) {
+        alert("Voer een organisatorische eenheid code in");
+        return;
+      }
+
+      await loadOpleidingenByCode(orgEenheidCode, datum);
+    });
+  </script>
+</body>
+</html>
